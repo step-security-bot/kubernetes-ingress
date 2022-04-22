@@ -66,7 +66,7 @@ jobs:
           echo "::set-output name=go_version::$(grep "go 1." go.mod | cut -d " " -f 2)"
           echo "::set-output name=k8s_latest::$(grep -m1 'FROM kindest/node' <tests/docker/Dockerfile | awk -F'[:v]' '{print $3}')"
       - name: Setup Golang Environment
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: ${{ steps.vars.outputs.go_version }}
       - name: Determine GOPATH
@@ -100,7 +100,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-build-
       - name: Setup Golang Environment
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: ${{ needs.checks.outputs.go_version }}
       - name: Build binary
@@ -136,7 +136,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-tests-
       - name: Setup Golang Environment
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: ${{ needs.checks.outputs.go_version }}
       - name: Run Tests
@@ -159,13 +159,13 @@ jobs:
             echo "::set-output name=matrix::{\"images\": \
                                                 [{\"image\": \"debian\", \"marker\": \"ingresses\"}, \
                                                 {\"image\": \"alpine\", \"marker\":\"vsr\"}, \
-                                                {\"image\": \"alpine-opentracing\", \"marker\":\"policies\"}, \
-                                                {\"image\": \"opentracing\", \"marker\": \"vs\"}, \
+                                                {\"image\": \"alpine\", \"marker\":\"policies\"}, \
+                                                {\"image\": \"debian\", \"marker\": \"vs\"}, \
                                                 {\"image\": \"ubi\", \"marker\": \"ts\"}, \
                                                 {\"image\": \"debian-plus\", \"marker\": \"vs\"}, \
                                                 {\"image\": \"debian-plus\", \"marker\": \"ts\"}, \
                                                 {\"image\": \"alpine-plus\", \"marker\":\"ingresses\"}, \
-                                                {\"image\": \"opentracing-plus\", \"marker\": \"vsr\"}, \
+                                                {\"image\": \"alpine-plus\", \"marker\": \"vsr\"}, \
                                                 {\"image\": \"ubi-plus\", \"marker\": \"policies\"}], \
                                               \"k8s\": [\"${{ needs.checks.outputs.k8s_latest }}\"]}"
           else
@@ -193,7 +193,7 @@ jobs:
           nginx-crt: ${{ secrets.NGINX_CRT }}
           nginx-key: ${{ secrets.NGINX_KEY }}
       - name: Upload Test Results
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ steps.smoke-tests.outputs.test-results-name }}
           path: ${{ github.workspace }}/tests/${{ steps.smoke-tests.outputs.test-results-name }}.html
@@ -276,16 +276,53 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-build-
       - name: Setup Golang Environment
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: ${{ needs.checks.outputs.go_version }}
-      - name: Publish Release Notes on new tag
-        uses: release-drafter/release-drafter@v5
+
+      - uses: actions/setup-node@v3
+      - run: npm install js-yaml
+        continue-on-error: true
+        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish release on tag
+        uses: actions/github-script@v6
+        continue-on-error: true
         with:
-            publish: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+              const ref = context.ref.split("/")[2]
+              const yaml = require('js-yaml');
+
+              const releases = (await github.rest.repos.listReleases({
+                owner: context.payload.repository.owner.login,
+                repo: context.payload.repository.name,
+                per_page: 100,
+              })).data
+
+              const draft_release = releases.find(release => release.draft && release.tag_name === ref)
+
+              const helm_file = (await github.rest.repos.getContent({
+                owner: context.payload.repository.owner.login,
+                repo: context.payload.repository.name,
+                path: "deployments/helm-chart/Chart.yaml",
+                ref: ref,
+              })).data.content
+
+              const helm_yaml = yaml.load(Buffer.from(helm_file, 'base64').toString())
+              const helm_version = helm_yaml.version
+              console.log(`Helm version: ${helm_version}`)
+
+              const update = await github.rest.repos.updateRelease({
+                owner: context.payload.repository.owner.login,
+                repo: context.payload.repository.name,
+                release_id: draft_release.id,
+                body: draft_release.body.replace("%HELM_CHART_VERSION%", helm_version),
+                draft: false
+              });
+              console.log(`Release published: ${update.data.html_url}`)
+              console.log(`Release notes: ${update.data.body}`)
+        if: startsWith(github.ref, 'refs/tags/')
+
       - name: Build binaries
         uses: goreleaser/goreleaser-action@v2
         with:
@@ -310,7 +347,7 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-          image: [debian, alpine, opentracing, alpine-opentracing]
+          image: [debian, alpine]
           platforms: ["linux/arm, linux/arm64, linux/amd64, linux/ppc64le, linux/s390x"]
           include:
             - image: ubi
@@ -360,7 +397,7 @@ jobs:
             nginx/nginx-ingress
             ghcr.io/nginxinc/kubernetes-ingress
             public.ecr.aws/nginx/nginx-ingress
-          flavor: suffix=${{ contains(matrix.image, 'ubi') && '-ubi' || '' }}${{ contains(matrix.image, 'alpine') && '-alpine' || '' }}${{ contains(matrix.image, 'opentracing') && '-ot' || '' }},onlatest=true
+          flavor: suffix=${{ contains(matrix.image, 'ubi') && '-ubi' || '' }}${{ contains(matrix.image, 'alpine') && '-alpine' || '' }},onlatest=true
           tags: |
             type=edge
             type=ref,event=pr
@@ -402,12 +439,13 @@ jobs:
           platforms: ${{ github.event_name != 'pull_request' && matrix.platforms || '' }}
           load: ${{ github.event_name == 'pull_request' }}
           push: ${{ github.event_name != 'pull_request' }}
+          pull: true
           no-cache: ${{ github.event_name != 'pull_request' }}
           build-args: |
             BUILD_OS=${{ matrix.image }}
             IC_VERSION=${{ steps.var.outputs.ic_version }}
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.2.2
+        uses: aquasecurity/trivy-action@0.2.5
         continue-on-error: true
         with:
           image-ref: nginx/nginx-ingress:${{ steps.meta.outputs.version }}
@@ -420,7 +458,7 @@ jobs:
         with:
           sarif_file: 'trivy-results-${{ matrix.image }}.sarif'
       - name: Upload Scan Results
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         continue-on-error: true
         with:
           name: 'trivy-results-${{ matrix.image }}.sarif'
@@ -434,11 +472,16 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-          image: [debian-plus, alpine-plus, opentracing-plus]
+          image: [debian-plus, alpine-plus]
           platforms: ["linux/arm64, linux/amd64"]
+          target: [goreleaser]
           include:
             - image: ubi-plus
               platforms: "linux/arm64, linux/amd64, linux/s390x"
+              target: goreleaser
+            - image: debian-plus
+              platforms: "linux/arm64, linux/amd64"
+              target: aws
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -463,6 +506,13 @@ jobs:
           username: _json_key
           password: ${{ secrets.GCR_JSON_KEY }}
         if: github.event_name != 'pull_request'
+      - name: Login to ECR
+        uses: docker/login-action@v1
+        with:
+          registry: 709825985650.dkr.ecr.us-east-1.amazonaws.com
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        if: startsWith(github.ref, 'refs/tags/')
 
       - name: Docker meta
         id: meta
@@ -471,8 +521,9 @@ jobs:
           images: |
             ${{ startsWith(github.ref, 'refs/tags/') && 'gcr.io/f5-gcs-7899-ptg-ingrss-ctlr/release/nginx-ic/nginx-plus-ingress' || '' }}
             ${{ startsWith(github.ref, 'refs/heads/release') && 'gcr.io/f5-gcs-7899-ptg-ingrss-ctlr/staging/nginx-ic/nginx-plus-ingress' || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && contains(matrix.target, 'aws') && '709825985650.dkr.ecr.us-east-1.amazonaws.com/nginx/nginx-plus-ingress' || '' }}
             gcr.io/f5-gcs-7899-ptg-ingrss-ctlr/dev/nginx-ic/nginx-plus-ingress
-          flavor: suffix=${{ contains(matrix.image, 'ubi') && '-ubi' || '' }}${{ contains(matrix.image, 'alpine') && '-alpine' || '' }}${{ contains(matrix.image, 'opentracing') && '-ot' || '' }},onlatest=true
+          flavor: suffix=${{ contains(matrix.image, 'ubi') && '-ubi' || '' }}${{ contains(matrix.image, 'alpine') && '-alpine' || '' }}${{ contains(matrix.target, 'aws') && '-mktpl' || '' }},onlatest=true
           tags: |
             type=edge
             type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/release') }}
@@ -503,12 +554,13 @@ jobs:
           context: '.'
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
-          target: goreleaser
+          target: ${{ matrix.target }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ github.event_name != 'pull_request' && matrix.platforms || '' }}
           load: ${{ github.event_name == 'pull_request' }}
           push: ${{ github.event_name != 'pull_request' }}
+          pull: true
           no-cache: ${{ github.event_name != 'pull_request' }}
           build-args: |
             BUILD_OS=${{ matrix.image }}
@@ -522,7 +574,7 @@ jobs:
           file: build/Dockerfile
           context: '.'
           cache-from: type=gha,scope=${{ matrix.image }}
-          target: goreleaser
+          target: ${{ matrix.target }}
           tags: docker.io/${{ matrix.image }}:${{ steps.meta.outputs.version }}
           load: true
           build-args: |
@@ -532,7 +584,7 @@ jobs:
             "nginx-repo.crt=${{ secrets.NGINX_CRT }}"
             "nginx-repo.key=${{ secrets.NGINX_KEY }}"
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.2.2
+        uses: aquasecurity/trivy-action@0.2.5
         continue-on-error: true
         with:
           image-ref: docker.io/${{ matrix.image }}:${{ steps.meta.outputs.version }}
@@ -545,7 +597,7 @@ jobs:
         with:
           sarif_file: 'trivy-results-${{ matrix.image }}.sarif'
       - name: Upload Scan Results
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         continue-on-error: true
         with:
           name: 'trivy-results-${{ matrix.image }}.sarif'
@@ -580,7 +632,7 @@ jobs:
       - name: Package
         run: helm package --version ${{ steps.var.outputs.helm_version }} ${{ env.HELM_CHART_DIR }}
       - name: Upload Chart
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: helm-chart
           path: ${{ github.workspace }}/nginx-ingress-${{ steps.var.outputs.helm_version }}.tgz
@@ -600,7 +652,7 @@ jobs:
       - name: Remove previous Chart
         run: rm -f ${{ github.workspace }}/${{ needs.package-helm.outputs.type }}/nginx-ingress-${{ needs.package-helm.outputs.version }}.tgz
       - name: Retrieve latest Helm Chart
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: helm-chart
           path: ${{ github.workspace }}/${{ needs.package-helm.outputs.type }}
