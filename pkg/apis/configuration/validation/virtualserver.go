@@ -25,6 +25,7 @@ type VirtualServerValidator struct {
 	isWildCardEnabled    bool
 }
 
+// IsWildCardEnabled modifies the VirtualServerValidator to set the isWildCardEnabled option
 func IsWildCardEnabled(wildCardEnabled bool) VsvOption {
 	return func(v *VirtualServerValidator) {
 		v.isWildCardEnabled = wildCardEnabled
