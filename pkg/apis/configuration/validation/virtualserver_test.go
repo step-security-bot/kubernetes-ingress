@@ -308,7 +308,7 @@ func TestValidateTLS(t *testing.T) {
 		},
 	}
 
-	vsv := &VirtualServerValidator{isPlus: false, isCertManagerEnabled: true}
+	vsv := &VirtualServerValidator{isPlus: false, isCertManagerEnabled: true, isWildCardEnabled: true}
 
 	for _, tls := range validTLSes {
 		allErrs := vsv.validateTLS(tls, field.NewPath("tls"))
@@ -354,7 +354,7 @@ func TestValidateTLS(t *testing.T) {
 		}
 	}
 
-	vsv2 := &VirtualServerValidator{isPlus: false}
+	vsv2 := &VirtualServerValidator{isPlus: false, isWildCardEnabled: false}
 	tls := v1.TLS{
 		Secret: "my-secret",
 		CertManager: &v1.CertManager{

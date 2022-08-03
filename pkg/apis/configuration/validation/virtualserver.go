@@ -22,6 +22,13 @@ type VirtualServerValidator struct {
 	isDosEnabled         bool
 	isCertManagerEnabled bool
 	isExternalDNSEnabled bool
+	isWildCardEnabled    bool
+}
+
+func IsWildCardEnabled(wildCardEnabled bool) VsvOption {
+	return func(v *VirtualServerValidator) {
+		v.isWildCardEnabled = wildCardEnabled
+	}
 }
 
 // IsPlus modifies the VirtualServerValidator to set the isPlus option.
@@ -152,11 +159,29 @@ func (vsv *VirtualServerValidator) validateTLS(tls *v1.TLS, fieldPath *field.Pat
 		return allErrs
 	}
 
-	allErrs = append(allErrs, validateSecretName(tls.Secret, fieldPath.Child("secret"))...)
+	allErrs = append(allErrs, validateVSSecretName(tls.Secret, vsv.isWildCardEnabled, fieldPath.Child("secret"))...)
 
 	allErrs = append(allErrs, validateTLSRedirect(tls.Redirect, fieldPath.Child("redirect"))...)
 
 	allErrs = append(allErrs, validateTLSCmFields(tls.CertManager, vsv.isCertManagerEnabled, tls.Secret, fieldPath.Child("cert-manager"))...)
+
+	return allErrs
+}
+
+// validateVSSecretName checks if a secret name is valid.
+func validateVSSecretName(name string, isWildCardEnabled bool, fieldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	if isWildCardEnabled && name == "" {
+		return allErrs
+	} else if !isWildCardEnabled {
+		allErrs = append(allErrs, field.Required(fieldPath, "must specify a secret or a global wildcard TLS secret"))
+		return allErrs
+	}
+
+	for _, msg := range validation.IsDNS1123Subdomain(name) {
+		allErrs = append(allErrs, field.Invalid(fieldPath, name, msg))
+	}
 
 	return allErrs
 }
