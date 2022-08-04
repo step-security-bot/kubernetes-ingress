@@ -319,6 +319,9 @@ func TestValidateTLS(t *testing.T) {
 
 	invalidTLSes := []*v1.TLS{
 		{
+			Secret: "", // This is invalid when isWildCardEnabled is false
+		},
+		{
 			Secret: "-",
 		},
 		{
@@ -347,21 +350,23 @@ func TestValidateTLS(t *testing.T) {
 		},
 	}
 
+	vsv2 := &VirtualServerValidator{isPlus: false, isCertManagerEnabled: true, isWildCardEnabled: false}
+
 	for _, tls := range invalidTLSes {
-		allErrs := vsv.validateTLS(tls, field.NewPath("tls"))
+		allErrs := vsv2.validateTLS(tls, field.NewPath("tls"))
 		if len(allErrs) == 0 {
 			t.Errorf("validateTLS() returned no errors for invalid input %v", tls)
 		}
 	}
 
-	vsv2 := &VirtualServerValidator{isPlus: false, isWildCardEnabled: false}
+	vsv3 := &VirtualServerValidator{isPlus: false, isWildCardEnabled: false}
 	tls := v1.TLS{
 		Secret: "my-secret",
 		CertManager: &v1.CertManager{
 			Issuer: "my-issuer",
 		},
 	}
-	err := vsv2.validateTLS(&tls, field.NewPath("tls"))
+	err := vsv3.validateTLS(&tls, field.NewPath("tls"))
 	if err == nil {
 		t.Errorf("validateTLS() returned no errors for invalid input %v", tls)
 	}

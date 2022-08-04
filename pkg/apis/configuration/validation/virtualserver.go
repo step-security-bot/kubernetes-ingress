@@ -169,15 +169,17 @@ func (vsv *VirtualServerValidator) validateTLS(tls *v1.TLS, fieldPath *field.Pat
 	return allErrs
 }
 
-// validateVSSecretName checks if a secret name is valid.
+// validateVSSecretName checks if a secret name for a VS object is valid.
 func validateVSSecretName(name string, isWildCardEnabled bool, fieldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 
-	if isWildCardEnabled && name == "" {
-		return allErrs
-	} else if !isWildCardEnabled {
-		allErrs = append(allErrs, field.Required(fieldPath, "must specify a secret or a global wildcard TLS secret"))
-		return allErrs
+	if name == "" {
+		if isWildCardEnabled {
+			return allErrs
+		} else {
+			allErrs = append(allErrs, field.Required(fieldPath, "must specify a secret or a global wildcard TLS secret"))
+			return allErrs
+		}
 	}
 
 	for _, msg := range validation.IsDNS1123Subdomain(name) {
