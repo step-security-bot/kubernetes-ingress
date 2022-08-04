@@ -1,10 +1,11 @@
 import pytest
 import requests
+import time
 from kubernetes.client.rest import ApiException
-
+from suite.fixtures import PublicEndpoint
 from settings import TEST_DATA
 from suite.vs_vsr_resources_utils import patch_virtual_server_from_yaml, get_vs_nginx_template_conf
-from suite.resources_utils import wait_before_test, get_first_pod_name
+from suite.resources_utils import wait_before_test, get_first_pod_name, create_secret_from_yaml, delete_secret
 
 
 @pytest.mark.vs
@@ -130,8 +131,62 @@ class TestVirtualServerTLSRedirect:
         assert resp_3.status_code == 200, "Expected: no redirect for scheme=https"
         assert resp_4.status_code == 200, "Expected: no redirect for scheme=https"
 
-    def test_tls_redirect_without_tls_termination(self, kube_apis, ingress_controller_prerequisites,
+    def test_tls_redirect_openapi_validation_flow(self, kube_apis, ingress_controller_prerequisites,
                                                   crd_ingress_controller, virtual_server_setup):
+        ic_pod_name = get_first_pod_name(kube_apis.v1, ingress_controller_prerequisites.namespace)
+        config_old = get_vs_nginx_template_conf(kube_apis.v1,
+                                                virtual_server_setup.namespace,
+                                                virtual_server_setup.vs_name,
+                                                ic_pod_name,
+                                                ingress_controller_prerequisites.namespace)
+        source_yaml = f"{TEST_DATA}/virtual-server-tls-redirect/virtual-server-invalid.yaml"
+        try:
+            patch_virtual_server_from_yaml(kube_apis.custom_objects,
+                                           virtual_server_setup.vs_name,
+                                           source_yaml,
+                                           virtual_server_setup.namespace)
+        except ApiException as ex:
+            assert ex.status == 422 \
+                   and "spec.tls.redirect.enable" in ex.body \
+                   and "spec.tls.redirect.code" in ex.body \
+                   and "spec.tls.redirect.basedOn" in ex.body \
+                   and "spec.tls.secret" in ex.body
+        except Exception as ex:
+            pytest.fail(f"An unexpected exception is raised: {ex}")
+        else:
+            pytest.fail("Expected an exception but there was none")
+
+        wait_before_test(1)
+        config_new = get_vs_nginx_template_conf(kube_apis.v1,
+                                                virtual_server_setup.namespace,
+                                                virtual_server_setup.vs_name,
+                                                ic_pod_name,
+                                                ingress_controller_prerequisites.namespace)
+        assert config_old == config_new, "Expected: config doesn't change"
+
+
+
+@pytest.fixture(scope="class")
+def wildcard_tls_secret_setup(request, kube_apis,
+                              ingress_controller_endpoint, test_namespace) -> None:
+    print("------------------------- Deploy Wildcard-Tls-Secret-Example -----------------------------------")
+
+    name = create_secret_from_yaml(kube_apis.v1, 'nginx-ingress',
+                                          f"{TEST_DATA}/wildcard-tls-secret/wildcard-tls-secret.yaml")
+
+    def fin():
+        print("Clean up Wildcard-Tls-Secret-Example:")
+        delete_secret(kube_apis.v1, name, 'nginx-ingress')
+    request.addfinalizer(fin)
+
+@pytest.mark.vs
+@pytest.mark.parametrize('crd_ingress_controller, virtual_server_setup',
+                         [({"type": "complete", "extra_args": [f"-enable-custom-resources", f"-wildcard-tls-secret=nginx-ingress/wildcard-tls-secret"]},
+                           {"example": "virtual-server-tls-redirect", "app_type": "simple"})],
+                         indirect=True)
+class TestVirtualServerTLSRedirectWildcard:
+    def test_tls_redirect_without_tls_termination_with_wildcard(self, kube_apis, ingress_controller_prerequisites,
+                                                  wildcard_tls_secret_setup, crd_ingress_controller, virtual_server_setup):
         source_yaml = f"{TEST_DATA}/virtual-server-tls-redirect/virtual-server-no-tls-termination-redirect.yaml"
         patch_virtual_server_from_yaml(kube_apis.custom_objects,
                                        virtual_server_setup.vs_name,
@@ -182,36 +237,3 @@ class TestVirtualServerTLSRedirect:
                               allow_redirects=False, verify=False)
         assert resp_7.status_code == 404, "Expected: no redirect for x-forwarded-proto=https and scheme=https"
         assert resp_8.status_code == 404, "Expected: no redirect for x-forwarded-proto=https and scheme=https"
-
-    def test_tls_redirect_openapi_validation_flow(self, kube_apis, ingress_controller_prerequisites,
-                                                  crd_ingress_controller, virtual_server_setup):
-        ic_pod_name = get_first_pod_name(kube_apis.v1, ingress_controller_prerequisites.namespace)
-        config_old = get_vs_nginx_template_conf(kube_apis.v1,
-                                                virtual_server_setup.namespace,
-                                                virtual_server_setup.vs_name,
-                                                ic_pod_name,
-                                                ingress_controller_prerequisites.namespace)
-        source_yaml = f"{TEST_DATA}/virtual-server-tls-redirect/virtual-server-invalid.yaml"
-        try:
-            patch_virtual_server_from_yaml(kube_apis.custom_objects,
-                                           virtual_server_setup.vs_name,
-                                           source_yaml,
-                                           virtual_server_setup.namespace)
-        except ApiException as ex:
-            assert ex.status == 422 \
-                   and "spec.tls.redirect.enable" in ex.body \
-                   and "spec.tls.redirect.code" in ex.body \
-                   and "spec.tls.redirect.basedOn" in ex.body \
-                   and "spec.tls.secret" in ex.body
-        except Exception as ex:
-            pytest.fail(f"An unexpected exception is raised: {ex}")
-        else:
-            pytest.fail("Expected an exception but there was none")
-
-        wait_before_test(1)
-        config_new = get_vs_nginx_template_conf(kube_apis.v1,
-                                                virtual_server_setup.namespace,
-                                                virtual_server_setup.vs_name,
-                                                ic_pod_name,
-                                                ingress_controller_prerequisites.namespace)
-        assert config_old == config_new, "Expected: config doesn't change"
