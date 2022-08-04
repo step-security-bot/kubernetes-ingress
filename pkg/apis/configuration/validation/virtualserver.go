@@ -174,12 +174,10 @@ func validateVSSecretName(name string, isWildCardEnabled bool, fieldPath *field.
 	allErrs := field.ErrorList{}
 
 	if name == "" {
-		if isWildCardEnabled {
-			return allErrs
-		} else {
+		if !isWildCardEnabled {
 			allErrs = append(allErrs, field.Required(fieldPath, "must specify a secret or a global wildcard TLS secret"))
-			return allErrs
 		}
+		return allErrs
 	}
 
 	for _, msg := range validation.IsDNS1123Subdomain(name) {
