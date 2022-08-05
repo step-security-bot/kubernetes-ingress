@@ -160,7 +160,7 @@ func (vsv *VirtualServerValidator) validateTLS(tls *v1.TLS, fieldPath *field.Pat
 		return allErrs
 	}
 
-	allErrs = append(allErrs, validateVSSecretName(tls.Secret, vsv.isWildCardEnabled, fieldPath.Child("secret"))...)
+	allErrs = append(allErrs, validateVSSecretName(tls.Secret, vsv.isWildCardEnabled, tls.Redirect, fieldPath.Child("secret"))...)
 
 	allErrs = append(allErrs, validateTLSRedirect(tls.Redirect, fieldPath.Child("redirect"))...)
 
@@ -170,12 +170,12 @@ func (vsv *VirtualServerValidator) validateTLS(tls *v1.TLS, fieldPath *field.Pat
 }
 
 // validateVSSecretName checks if a secret name for a VS object is valid.
-func validateVSSecretName(name string, isWildCardEnabled bool, fieldPath *field.Path) field.ErrorList {
+func validateVSSecretName(name string, isWildCardEnabled bool, redirect *v1.TLSRedirect, fieldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 
 	if name == "" {
-		if !isWildCardEnabled {
-			allErrs = append(allErrs, field.Required(fieldPath, "must specify a secret or a global wildcard TLS secret"))
+		if !isWildCardEnabled && redirect == nil {
+			allErrs = append(allErrs, field.Required(fieldPath, "must specify a secret, a global wildcard TLS secret or a redirect"))
 		}
 		return allErrs
 	}

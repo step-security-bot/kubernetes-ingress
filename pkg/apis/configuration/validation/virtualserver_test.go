@@ -273,6 +273,10 @@ func TestValidateTLS(t *testing.T) {
 			Secret: "",
 		},
 		{
+			Secret:   "",
+			Redirect: &v1.TLSRedirect{},
+		},
+		{
 			Secret: "my-secret",
 		},
 		{
