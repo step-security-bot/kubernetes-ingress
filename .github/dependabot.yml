@@ -29,3 +29,14 @@ updates:
     directory: /perf-tests
     schedule:
       interval: weekly
+
+
+  - package-ecosystem: npm
+    directory: /docs/_vendor/gitlab.com/f5/nginx/controller/poc/f5-hugo
+    schedule:
+      interval: daily
+
+  - package-ecosystem: gomod
+    directory: /docs
+    schedule:
+      interval: daily
