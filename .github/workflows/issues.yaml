@@ -10,6 +10,11 @@ jobs:
     if: ${{ !github.event.issue.pull_request }}
     runs-on: ubuntu-22.04
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@03bee3930647ebbf994244c21ddbc0d4933aab4f # v2.3.0
+        with:
+          egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
+
       - name: text
         id: controller
         if: contains(github.event.issue.body, 'nginx.ingress.kubernetes.io')
